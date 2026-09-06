@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: multi-ai-chat
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/data   # matches lib/db.js's ./data path
+      sizeGB: 1
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: XAI_API_KEY
+        sync: false
+      - key: MANUS_API_KEY
+        sync: false
