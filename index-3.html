@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Relay — one thread, four AIs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0B0E14;
+    --panel: #12161F;
+    --panel-raised: #171C27;
+    --border: #232838;
+    --text: #E6E8EF;
+    --text-muted: #8B93A7;
+    --text-faint: #565E72;
+
+    --claude: #C96442;
+    --openai: #10A37F;
+    --grok: #6366F1;
+    --manus: #E0A72E;
+
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    height: 100vh;
+  }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 20px 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .brand span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    font-weight: 400;
+  }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-bottom: 8px;
+    text-transform: lowercase;
+  }
+  .thread-list, .file-list { display: flex; flex-direction: column; gap: 2px; }
+  .thread-item, .file-item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .thread-item:hover, .file-item:hover { background: var(--panel-raised); color: var(--text); }
+  .thread-item.active { background: var(--panel-raised); color: var(--text); border: 1px solid var(--border); }
+  .file-item { font-family: var(--font-mono); font-size: 12.5px; }
+  .file-item .updated-by { float: right; opacity: 0.6; }
+  .new-thread-btn {
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    text-align: left;
+  }
+  .new-thread-btn:hover { color: var(--text); border-color: var(--text-faint); }
+
+  /* ---------- Main ---------- */
+  .main { display: flex; flex-direction: column; height: 100vh; }
+  .thread-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .msg { max-width: 680px; display: flex; flex-direction: column; gap: 4px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.assistant { align-self: flex-start; }
+
+  .msg-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 10px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user .bubble { background: var(--panel-raised); border: 1px solid var(--border); }
+  .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--ai-color, var(--border)); }
+
+  .empty-state {
+    margin: auto;
+    text-align: center;
+    color: var(--text-faint);
+    max-width: 420px;
+    font-size: 13.5px;
+  }
+  .empty-state strong { color: var(--text-muted); display: block; margin-bottom: 6px; font-family: var(--font-display); font-size: 16px; }
+
+  /* ---------- Composer ---------- */
+  .composer {
+    border-top: 1px solid var(--border);
+    padding: 16px 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .model-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+  .model-btn {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-faint);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .model-btn:disabled { cursor: not-allowed; opacity: 0.4; }
+  .model-btn.active { color: var(--text); border-color: var(--ai-color); background: var(--panel-raised); }
+  .model-btn:not(:disabled):hover { color: var(--text); }
+
+  .input-row { display: flex; gap: 10px; }
+  textarea {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    padding: 12px 14px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    resize: none;
+    min-height: 44px;
+    max-height: 160px;
+  }
+  textarea:focus { outline: none; border-color: var(--text-faint); }
+  .send-btn {
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 10px;
+    padding: 0 20px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status-line {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    min-height: 14px;
+  }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">Relay <span>shared thread · 4 models</span></div>
+
+    <div>
+      <div class="section-label">projects</div>
+      <div class="thread-list" id="threadList"></div>
+      <button class="new-thread-btn" id="newThreadBtn" style="margin-top:6px;">+ new project</button>
+    </div>
+
+    <div>
+      <div class="section-label">files</div>
+      <div class="file-list" id="fileList">
+        <div style="color:var(--text-faint); font-size:12px; font-family:var(--font-mono);">no files yet</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="thread-header" id="threadTitle">Select or create a project</div>
+    <div class="messages" id="messages">
+      <div class="empty-state">
+        <strong>One conversation. Four AIs.</strong>
+        Every message — from you or any model — lands in the same shared thread.
+        Switch the picker below at any time; whichever AI you pick reads everything
+        that happened before it, including what the others just did.
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="model-picker" id="modelPicker"></div>
+      <div class="input-row">
+        <textarea id="input" placeholder="Message the selected AI…" rows="1"></textarea>
+        <button class="send-btn" id="sendBtn">Send</button>
+      </div>
+      <div class="status-line" id="statusLine"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const AI_COLORS = { claude: 'var(--claude)', openai: 'var(--openai)', grok: 'var(--grok)', manus: 'var(--manus)' };
+
+let state = { threadId: null, provider: null, providers: [] };
+
+async function api(path, opts) {
+  const res = await fetch('/api' + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function init() {
+  state.providers = await api('/providers');
+  renderModelPicker();
+
+  const threads = await api('/threads');
+  renderThreadList(threads);
+
+  if (threads.length) {
+    selectThread(threads[0].id, threads[0].title);
+  }
+}
+
+function renderModelPicker() {
+  const el = document.getElementById('modelPicker');
+  el.innerHTML = '';
+  state.providers.forEach((p) => {
+    const btn = document.createElement('button');
+    btn.className = 'model-btn' + (state.provider === p.id ? ' active' : '');
+    btn.style.setProperty('--ai-color', AI_COLORS[p.id]);
+    btn.disabled = !p.enabled;
+    btn.innerHTML = `<span class="dot" style="background:${AI_COLORS[p.id]}"></span>${p.label}${p.enabled ? '' : ' (no key)'}`;
+    btn.onclick = () => { state.provider = p.id; renderModelPicker(); };
+    el.appendChild(btn);
+  });
+  if (!state.provider) {
+    const firstEnabled = state.providers.find((p) => p.enabled);
+    if (firstEnabled) { state.provider = firstEnabled.id; renderModelPicker(); }
+  }
+}
+
+function renderThreadList(threads) {
+  const el = document.getElementById('threadList');
+  el.innerHTML = '';
+  threads.forEach((t) => {
+    const item = document.createElement('div');
+    item.className = 'thread-item' + (t.id === state.threadId ? ' active' : '');
+    item.textContent = t.title;
+    item.onclick = () => selectThread(t.id, t.title);
+    el.appendChild(item);
+  });
+}
+
+async function selectThread(id, title) {
+  state.threadId = id;
+  document.getElementById('threadTitle').textContent = title;
+  const threads = await api('/threads');
+  renderThreadList(threads);
+  await loadMessages();
+  await loadFiles();
+}
+
+async function loadMessages() {
+  const messages = await api(`/threads/${state.threadId}/messages`);
+  const el = document.getElementById('messages');
+  el.innerHTML = '';
+  if (!messages.length) {
+    el.innerHTML = `<div class="empty-state"><strong>Empty project</strong>Send the first message below to get started.</div>`;
+    return;
+  }
+  messages.forEach((m) => el.appendChild(renderMessage(m)));
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderMessage(m) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + m.role;
+  if (m.role === 'assistant') {
+    wrap.style.setProperty('--ai-color', AI_COLORS[m.ai_provider] || 'var(--border)');
+  }
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  const providerLabel = state.providers.find((p) => p.id === m.ai_provider)?.label;
+  label.innerHTML = m.role === 'user'
+    ? 'You'
+    : `<span class="dot" style="background:${AI_COLORS[m.ai_provider] || '#666'}"></span>${providerLabel || m.ai_provider}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = m.content;
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  return wrap;
+}
+
+async function loadFiles() {
+  const files = await api(`/threads/${state.threadId}/files`);
+  const el = document.getElementById('fileList');
+  el.innerHTML = '';
+  if (!files.length) {
+    el.innerHTML = '<div style="color:var(--text-faint); font-size:12px; font-family:var(--font-mono);">no files yet</div>';
+    return;
+  }
+  files.forEach((f) => {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.innerHTML = `${f.path}<span class="updated-by">${f.updated_by_ai || ''}</span>`;
+    el.appendChild(item);
+  });
+}
+
+async function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text || !state.threadId || !state.provider) return;
+
+  input.value = '';
+  input.disabled = true;
+  document.getElementById('sendBtn').disabled = true;
+  const status = document.getElementById('statusLine');
+
+  // optimistic render of the user message
+  const el = document.getElementById('messages');
+  if (el.querySelector('.empty-state')) el.innerHTML = '';
+  el.appendChild(renderMessage({ role: 'user', content: text }));
+  el.scrollTop = el.scrollHeight;
+
+  const providerLabel = state.providers.find((p) => p.id === state.provider)?.label;
+  status.textContent = `${providerLabel} is responding…`;
+
+  try {
+    await api(`/threads/${state.threadId}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ message: text, provider: state.provider }),
+    });
+    status.textContent = '';
+    await loadMessages();
+    await loadFiles();
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+  } finally {
+    input.disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+    input.focus();
+  }
+}
+
+document.getElementById('sendBtn').onclick = sendMessage;
+document.getElementById('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+document.getElementById('newThreadBtn').onclick = async () => {
+  const title = prompt('Project name:', 'Roblox Game');
+  if (!title) return;
+  const thread = await api('/threads', { method: 'POST', body: JSON.stringify({ title }) });
+  await selectThread(thread.id, thread.title);
+};
+
+init();
+</script>
+</body>
+</html>
